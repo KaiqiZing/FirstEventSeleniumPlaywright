@@ -39,12 +39,18 @@ pipeline {
             defaultValue: 'C:/Users/Administrator/AppData/Local/ms-playwright',
             description: 'Playwright 浏览器内核共享缓存目录（解决 Windows Jenkins 服务账户看不到桌面用户缓存的问题）'
         )
+        string(
+            name: 'PW_DEBUG',
+            defaultValue: 'pw:browser*',
+            description: 'Playwright 底层调试日志开关（如 pw:browser* 输出浏览器 stderr；留空关闭）'
+        )
     }
 
     environment {
         PYTHONUTF8 = '1'
         PYTHONIOENCODING = 'utf-8'
         PLAYWRIGHT_BROWSERS_PATH = "${params.PLAYWRIGHT_BROWSERS_PATH ?: 'C:/Users/Administrator/AppData/Local/ms-playwright'}"
+        DEBUG = "${params.PW_DEBUG != null ? params.PW_DEBUG : 'pw:browser*'}"
         ACCEPTANCE_FRONTEND_URL = "${params.FRONTEND_URL}"
         ACCEPTANCE_API_URL = "${params.API_URL}"
         ACCEPTANCE_BROWSER = "${params.BROWSER}"
@@ -56,6 +62,12 @@ pipeline {
             steps {
                 bat '''
                     chcp 65001 > nul
+                    echo ===== Jenkins Runtime Context =====
+                    whoami
+                    echo USERPROFILE=%USERPROFILE%
+                    echo PLAYWRIGHT_BROWSERS_PATH=%PLAYWRIGHT_BROWSERS_PATH%
+                    echo DEBUG=%DEBUG%
+                    dir C:\\Users\\Administrator\\AppData\\Local\\ms-playwright
                     echo ===== Python & Dependency Check =====
                     python --version
                     python -m pip install -q -r requirements.txt
