@@ -102,7 +102,7 @@ pipeline {
                         ${py} --version
                         ${py} -c "import os, platform; print('OS:', platform.platform()); print('FRONTEND_URL:', os.environ.get('ACCEPTANCE_FRONTEND_URL')); print('API_URL:', os.environ.get('ACCEPTANCE_API_URL')); print('PLAYWRIGHT_BROWSERS_PATH:', os.environ.get('PLAYWRIGHT_BROWSERS_PATH', '<default>'))"
                         ${py} -c "import playwright, pytest, yaml, requests, allure; print('Python deps ready')" || ${py} -m pip install -q -r requirements.txt
-                        ${py} -c "import shutil, pathlib; [shutil.rmtree(p, ignore_errors=True) for p in ('report/junit', 'report/allure-results', 'logs/screenshots', 'logs/traces')]; [pathlib.Path(p).mkdir(parents=True, exist_ok=True) for p in ('report/junit', 'report/allure-results')]"
+                        ${py} -c "import shutil, pathlib; [shutil.rmtree(p, ignore_errors=True) for p in ('report/junit', 'report/allure-results', 'report/acceptance', 'logs/screenshots', 'logs/traces')]; [pathlib.Path(p).mkdir(parents=True, exist_ok=True) for p in ('report/junit', 'report/allure-results')]"
                     """)
                 }
             }
