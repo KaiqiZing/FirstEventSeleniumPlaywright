@@ -53,10 +53,7 @@ pipeline {
                     echo ===== Python & Dependency Check =====
                     python --version
                     python -m pip install -q -r requirements.txt
-                    if exist report\junit rmdir /s /q report\junit
-                    if exist report\allure-results rmdir /s /q report\allure-results
-                    mkdir report\junit
-                    mkdir report\allure-results
+                    python -c "import shutil, pathlib; [shutil.rmtree(p, ignore_errors=True) for p in ('report/junit', 'report/allure-results')]; [pathlib.Path(p).mkdir(parents=True, exist_ok=True) for p in ('report/junit', 'report/allure-results')]"
                 '''
             }
         }
