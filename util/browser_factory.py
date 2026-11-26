@@ -112,6 +112,8 @@ class BrowserFactory:
             args: list[str] = []
             if platform.system() == "Linux":
                 args.extend(["--no-sandbox", "--disable-dev-shm-usage"])
+            if use_headless:
+                args.append("--disable-gpu")
             if maximize and not use_headless:
                 args.append("--start-maximized")
             if args:

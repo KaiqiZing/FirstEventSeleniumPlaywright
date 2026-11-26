@@ -34,11 +34,17 @@ pipeline {
             defaultValue: 'http://127.0.0.1:5050',
             description: '被测后端接口地址'
         )
+        string(
+            name: 'PLAYWRIGHT_BROWSERS_PATH',
+            defaultValue: 'C:/Users/Administrator/AppData/Local/ms-playwright',
+            description: 'Playwright 浏览器内核共享缓存目录（解决 Windows Jenkins 服务账户看不到桌面用户缓存的问题）'
+        )
     }
 
     environment {
         PYTHONUTF8 = '1'
         PYTHONIOENCODING = 'utf-8'
+        PLAYWRIGHT_BROWSERS_PATH = "${params.PLAYWRIGHT_BROWSERS_PATH}"
         ACCEPTANCE_FRONTEND_URL = "${params.FRONTEND_URL}"
         ACCEPTANCE_API_URL = "${params.API_URL}"
         ACCEPTANCE_BROWSER = "${params.BROWSER}"
