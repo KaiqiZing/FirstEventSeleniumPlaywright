@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import os
 import sys
 import time
 from dataclasses import dataclass
@@ -28,7 +29,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from util.browser_factory import BrowserFactory  # noqa: E402
 
-BASE_URL = "http://localhost:5173/"
+BASE_URL = os.environ.get("ACCEPTANCE_FRONTEND_URL", "http://localhost:5173").rstrip("/") + "/"
 EXPECTED_GROUPS = [
     "页面交互类",
     "等待与响应类",

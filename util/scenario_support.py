@@ -1,6 +1,7 @@
 """场景导航 / 结果区断言 / 服务预检等通用工具（Playwright 版，不依赖具体 handle）。"""
 from __future__ import annotations
 
+import os
 import re
 import time
 
@@ -25,6 +26,9 @@ _effective_base_url: str | None = None
 def get_base_url() -> str:
     if _effective_base_url:
         return _effective_base_url
+    env_override = os.environ.get("ACCEPTANCE_FRONTEND_URL", "").strip()
+    if env_override:
+        return env_override.rstrip("/")
     env_config = Config().get_env_config()
     return str(env_config.get("base_url", "http://localhost:5173")).rstrip("/")
 
@@ -57,6 +61,9 @@ def resolve_base_url(timeout: int = 3) -> str:
 
 
 def get_api_base_url() -> str:
+    env_override = os.environ.get("ACCEPTANCE_API_URL", "").strip()
+    if env_override:
+        return env_override.rstrip("/")
     env_config = Config().get_env_config()
     return str(env_config.get("api_base_url", "http://127.0.0.1:5050")).rstrip("/")
 
