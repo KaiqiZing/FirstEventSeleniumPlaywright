@@ -44,7 +44,7 @@ pipeline {
     environment {
         PYTHONUTF8 = '1'
         PYTHONIOENCODING = 'utf-8'
-        PLAYWRIGHT_BROWSERS_PATH = "${params.PLAYWRIGHT_BROWSERS_PATH}"
+        PLAYWRIGHT_BROWSERS_PATH = "${params.PLAYWRIGHT_BROWSERS_PATH ?: 'C:/Users/Administrator/AppData/Local/ms-playwright'}"
         ACCEPTANCE_FRONTEND_URL = "${params.FRONTEND_URL}"
         ACCEPTANCE_API_URL = "${params.API_URL}"
         ACCEPTANCE_BROWSER = "${params.BROWSER}"
