@@ -1,0 +1,39 @@
+# Jenkins Inbound Agent with Python + Playwright (Chromium / Chrome / Edge / Firefox / WebKit)
+FROM mcr.microsoft.com/playwright/python:v1.58.0-noble
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    PYTHONUTF8=1 \
+    PYTHONIOENCODING=utf-8
+
+# 1. Install Java 21 (for Jenkins agent.jar), Git, curl, and CJK fonts for readable Chinese screenshots
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    openjdk-21-jre-headless \
+    git \
+    curl \
+    ca-certificates \
+    fonts-noto-cjk \
+    && rm -rf /var/lib/apt/lists/*
+
+# 2. Pre-install exact matching Playwright Python package + project dependencies
+COPY requirements.txt /tmp/requirements.txt
+RUN python3 -m pip install --no-cache-dir --break-system-packages playwright==1.58.0 -r /tmp/requirements.txt \
+    && rm -f /tmp/requirements.txt
+
+# 3. Install branded Chrome & Microsoft Edge channels (in addition to pre-installed Chromium/Firefox/WebKit)
+RUN python3 -m playwright install chrome msedge
+
+# 4. Create non-root jenkins agent user and ensure browser cache is readable
+RUN useradd -m -s /bin/bash jenkins \
+    && mkdir -p /home/jenkins/agent \
+    && chown -R jenkins:jenkins /home/jenkins \
+    && chmod -R a+rX /ms-playwright
+
+COPY docker/entrypoint-agent.sh /usr/local/bin/entrypoint-agent.sh
+RUN sed -i 's/\r$//' /usr/local/bin/entrypoint-agent.sh \
+    && chmod +x /usr/local/bin/entrypoint-agent.sh
+
+USER jenkins
+WORKDIR /home/jenkins/agent
+
+ENTRYPOINT ["/usr/local/bin/entrypoint-agent.sh"]

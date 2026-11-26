@@ -1,3 +1,35 @@
+def runCrossPlatform(String cmd) {
+    if (isUnix()) {
+        sh """
+            set -e
+            if [ -f /.dockerenv ]; then
+                export ACCEPTANCE_FRONTEND_URL="\$(echo "\$ACCEPTANCE_FRONTEND_URL" | sed 's|://localhost|://host.docker.internal|g; s|://127.0.0.1|://host.docker.internal|g')"
+                export ACCEPTANCE_API_URL="\$(echo "\$ACCEPTANCE_API_URL" | sed 's|://localhost|://host.docker.internal|g; s|://127.0.0.1|://host.docker.internal|g')"
+            fi
+            if [ -n "\${CUSTOM_PW_BROWSERS_PATH:-}" ]; then
+                export PLAYWRIGHT_BROWSERS_PATH="\$CUSTOM_PW_BROWSERS_PATH"
+            fi
+            if [ -n "\${CUSTOM_PW_DEBUG:-}" ]; then
+                export DEBUG="\$CUSTOM_PW_DEBUG"
+            fi
+            ${cmd}
+        """
+    } else {
+        bat """
+            chcp 65001 > nul
+            if not "%CUSTOM_PW_BROWSERS_PATH%"=="" (
+                set "PLAYWRIGHT_BROWSERS_PATH=%CUSTOM_PW_BROWSERS_PATH%"
+            ) else if "%PLAYWRIGHT_BROWSERS_PATH%"=="" (
+                set "PLAYWRIGHT_BROWSERS_PATH=C:/Users/Administrator/AppData/Local/ms-playwright"
+            )
+            if not "%CUSTOM_PW_DEBUG%"=="" (
+                set "DEBUG=%CUSTOM_PW_DEBUG%"
+            )
+            ${cmd}
+        """
+    }
+}
+
 pipeline {
     agent any
 
@@ -17,7 +49,7 @@ pipeline {
         choice(
             name: 'BROWSER',
             choices: ['chromium', 'chrome', 'edge', 'firefox', 'webkit'],
-            description: '目标浏览器内核（chromium 缺失内置版本时自动回退本机 Chrome/Edge）'
+            description: '目标浏览器内核（chromium 缺失内置版本时自动回退系统 Chrome/Edge）'
         )
         choice(
             name: 'TRACE_MODE',
@@ -27,96 +59,82 @@ pipeline {
         string(
             name: 'FRONTEND_URL',
             defaultValue: 'http://localhost:5173',
-            description: '被测前端测试地址'
+            description: '被测前端测试地址（Docker 容器内会自动将 localhost 映射为 host.docker.internal）'
         )
         string(
             name: 'API_URL',
             defaultValue: 'http://127.0.0.1:5050',
-            description: '被测后端接口地址'
+            description: '被测后端接口地址（Docker 容器内会自动将 127.0.0.1 映射为 host.docker.internal）'
         )
         string(
             name: 'PLAYWRIGHT_BROWSERS_PATH',
-            defaultValue: 'C:/Users/Administrator/AppData/Local/ms-playwright',
-            description: 'Playwright 浏览器内核共享缓存目录（解决 Windows Jenkins 服务账户看不到桌面用户缓存的问题）'
+            defaultValue: '',
+            description: '可选：覆盖 Playwright 浏览器缓存目录（Linux Docker 留空使用镜像内置 /ms-playwright；Windows 留空默认使用 Administrator 缓存）'
         )
         string(
             name: 'PW_DEBUG',
-            defaultValue: 'pw:browser*',
-            description: 'Playwright 底层调试日志开关（如 pw:browser* 输出浏览器 stderr；留空关闭）'
+            defaultValue: '',
+            description: '可选：Playwright 底层调试日志开关（如 pw:browser*；留空关闭）'
         )
     }
 
     environment {
         PYTHONUTF8 = '1'
         PYTHONIOENCODING = 'utf-8'
-        PLAYWRIGHT_BROWSERS_PATH = "${params.PLAYWRIGHT_BROWSERS_PATH ?: 'C:/Users/Administrator/AppData/Local/ms-playwright'}"
-        DEBUG = "${params.PW_DEBUG != null ? params.PW_DEBUG : 'pw:browser*'}"
-        ACCEPTANCE_FRONTEND_URL = "${params.FRONTEND_URL}"
-        ACCEPTANCE_API_URL = "${params.API_URL}"
-        ACCEPTANCE_BROWSER = "${params.BROWSER}"
-        ACCEPTANCE_TRACE_MODE = "${params.TRACE_MODE}"
+        CUSTOM_PW_BROWSERS_PATH = "${params.PLAYWRIGHT_BROWSERS_PATH ?: ''}"
+        CUSTOM_PW_DEBUG = "${params.PW_DEBUG ?: ''}"
+        ACCEPTANCE_FRONTEND_URL = "${params.FRONTEND_URL ?: 'http://localhost:5173'}"
+        ACCEPTANCE_API_URL = "${params.API_URL ?: 'http://127.0.0.1:5050'}"
+        ACCEPTANCE_BROWSER = "${params.BROWSER ?: 'chromium'}"
+        ACCEPTANCE_TRACE_MODE = "${params.TRACE_MODE ?: 'retain-on-failure'}"
     }
 
     stages {
         stage('1. Environment Check') {
             steps {
-                bat '''
-                    chcp 65001 > nul
-                    echo ===== Jenkins Runtime Context =====
-                    whoami
-                    echo USERPROFILE=%USERPROFILE%
-                    echo PLAYWRIGHT_BROWSERS_PATH=%PLAYWRIGHT_BROWSERS_PATH%
-                    echo DEBUG=%DEBUG%
-                    dir C:\\Users\\Administrator\\AppData\\Local\\ms-playwright
-                    echo ===== Python & Dependency Check =====
-                    python --version
-                    python -m pip install -q -r requirements.txt
-                    python -c "import shutil, pathlib; [shutil.rmtree(p, ignore_errors=True) for p in ('report/junit', 'report/allure-results')]; [pathlib.Path(p).mkdir(parents=True, exist_ok=True) for p in ('report/junit', 'report/allure-results')]"
-                '''
+                script {
+                    def py = isUnix() ? 'python3' : 'python'
+                    runCrossPlatform("""
+                        echo "===== Jenkins Runtime Context ====="
+                        whoami
+                        ${py} --version
+                        ${py} -c "import os, platform; print('OS:', platform.platform()); print('FRONTEND_URL:', os.environ.get('ACCEPTANCE_FRONTEND_URL')); print('API_URL:', os.environ.get('ACCEPTANCE_API_URL')); print('PLAYWRIGHT_BROWSERS_PATH:', os.environ.get('PLAYWRIGHT_BROWSERS_PATH', '<default>'))"
+                        ${py} -c "import playwright, pytest, yaml, requests, allure; print('Python deps ready')" || ${py} -m pip install -q -r requirements.txt
+                        ${py} -c "import shutil, pathlib; [shutil.rmtree(p, ignore_errors=True) for p in ('report/junit', 'report/allure-results', 'logs/screenshots', 'logs/traces')]; [pathlib.Path(p).mkdir(parents=True, exist_ok=True) for p in ('report/junit', 'report/allure-results')]"
+                    """)
+                }
             }
         }
 
         stage('2. Service Preflight') {
             steps {
-                bat '''
-                    chcp 65001 > nul
-                    python -c "import os, requests; fe=os.environ['ACCEPTANCE_FRONTEND_URL']; be=os.environ['ACCEPTANCE_API_URL']; r1=requests.get(fe, timeout=5); r2=requests.get(be + '/api/health', timeout=5); print('Frontend:', fe, r1.status_code); print('Backend:', be, r2.status_code, r2.text); assert r1.status_code < 500 and r2.status_code == 200"
-                '''
+                script {
+                    def py = isUnix() ? 'python3' : 'python'
+                    runCrossPlatform("""
+                        ${py} -c "import os, requests; fe=os.environ['ACCEPTANCE_FRONTEND_URL']; be=os.environ['ACCEPTANCE_API_URL']; r1=requests.get(fe, timeout=5); r2=requests.get(be + '/api/health', timeout=5); print('Frontend:', fe, r1.status_code); print('Backend:', be, r2.status_code, r2.text); assert r1.status_code < 500 and r2.status_code == 200"
+                    """)
+                }
             }
         }
 
         stage('3. Run Playwright Tests') {
             steps {
                 script {
-                    def mode = params.RUN_MODE
-                    def browser = params.BROWSER
-                    def traceMode = params.TRACE_MODE
+                    def py = isUnix() ? 'python3' : 'python'
+                    def mode = params.RUN_MODE ?: 'smoke'
+                    def browser = params.BROWSER ?: 'chromium'
+                    def traceMode = params.TRACE_MODE ?: 'retain-on-failure'
 
                     if (mode == 'smoke') {
-                        bat """
-                            chcp 65001 > nul
-                            python -m pytest -m smoke --browser ${browser} --headless --pw-trace ${traceMode} --tb=short --junitxml=report/junit/smoke.xml --alluredir=report/allure-results
-                        """
+                        runCrossPlatform("${py} -m pytest -m smoke --browser ${browser} --headless --pw-trace ${traceMode} --tb=short --junitxml=report/junit/smoke.xml --alluredir=report/allure-results")
                     } else if (mode == 'ui-menu') {
-                        bat """
-                            chcp 65001 > nul
-                            python -m pytest demo/test_menu_tag_consistency.py -v -s --junitxml=report/junit/ui_menu.xml --alluredir=report/allure-results
-                        """
+                        runCrossPlatform("${py} -m pytest demo/test_menu_tag_consistency.py -v -s --junitxml=report/junit/ui_menu.xml --alluredir=report/allure-results")
                     } else if (mode == 'acceptance-smoke') {
-                        bat """
-                            chcp 65001 > nul
-                            python .agents/skills/project-acceptance/scripts/run_acceptance.py --profile smoke --browser ${browser} --headless
-                        """
+                        runCrossPlatform("${py} .agents/skills/project-acceptance/scripts/run_acceptance.py --profile smoke --browser ${browser} --headless")
                     } else if (mode == 'regression') {
-                        bat """
-                            chcp 65001 > nul
-                            python -m pytest -m regression --browser ${browser} --headless --pw-trace ${traceMode} --tb=short --junitxml=report/junit/regression.xml --alluredir=report/allure-results
-                        """
+                        runCrossPlatform("${py} -m pytest -m regression --browser ${browser} --headless --pw-trace ${traceMode} --tb=short --junitxml=report/junit/regression.xml --alluredir=report/allure-results")
                     } else {
-                        bat """
-                            chcp 65001 > nul
-                            python -m pytest case/ --browser ${browser} --headless --pw-trace ${traceMode} --tb=short --junitxml=report/junit/full.xml --alluredir=report/allure-results
-                        """
+                        runCrossPlatform("${py} -m pytest case/ --browser ${browser} --headless --pw-trace ${traceMode} --tb=short --junitxml=report/junit/full.xml --alluredir=report/allure-results")
                     }
                 }
             }
