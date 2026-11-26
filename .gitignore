@@ -1,0 +1,52 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+.venv/
+venv/
+env/
+.UIEvents/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+.coverage
+htmlcov/
+
+# ---- Secrets & local env ----
+.env
+.env.*
+!.env.example
+
+# ---- IDE / OS / Workspace ----
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
+.codebuddy/
+
+# ---- Test run artifacts (logs / screenshots / traces / downloads / reports) ----
+# log/ 目录仅保留 *.py 源码，忽略运行日志
+log/logs/
+logs/
+*.log
+*.log.*
+downloads/
+report/
+allure-results/
+allure-report/
+playwright-report/
+test-results/
+junit*.xml
+
+# ---- Local docs & temp / DB files ----
+docs/
+*.db
+*.sqlite
+*.sqlite3
+*.tmp
+*.bak
