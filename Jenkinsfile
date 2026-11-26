@@ -8,6 +8,8 @@ def runCrossPlatform(String cmd) {
             fi
             if [ -n "\${CUSTOM_PW_BROWSERS_PATH:-}" ]; then
                 export PLAYWRIGHT_BROWSERS_PATH="\$CUSTOM_PW_BROWSERS_PATH"
+            elif [ -z "\${PLAYWRIGHT_BROWSERS_PATH:-}" ] && [ -d /ms-playwright ]; then
+                export PLAYWRIGHT_BROWSERS_PATH="/ms-playwright"
             fi
             if [ -n "\${CUSTOM_PW_DEBUG:-}" ]; then
                 export DEBUG="\$CUSTOM_PW_DEBUG"
