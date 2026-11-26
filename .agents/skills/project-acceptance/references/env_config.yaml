@@ -1,0 +1,78 @@
+# =============================================================================
+# 项目验收环境配置（可变配置层 - 跨项目迁移仅需替换 references/ 目录）
+# 支持 ${ENV_VAR:-default} 环境变量插值；所有敏感凭证严禁明文硬编码。
+# =============================================================================
+
+project:
+  name: "FirstEventSeleniumPlaywright"
+  code: "UIEVENT"
+  env: "${ACCEPTANCE_ENV:-dev}"
+  owner: "QA Automation"
+
+services:
+  frontend:
+    url: "${ACCEPTANCE_FRONTEND_URL:-http://localhost:5173}"
+    health_path: "/"
+    fallback_ports: [5173, 5174]
+    timeout_seconds: 5
+  backend:
+    url: "${ACCEPTANCE_API_URL:-http://127.0.0.1:5050}"
+    health_path: "/api/health"
+    expected_http_status: 200
+    expected_json_code: 0
+    timeout_seconds: 5
+
+auth:
+  # 鉴权方式：session_cookie / bearer_token / none
+  mode: "session_cookie"
+  # 令牌与账号通过环境变量注入，报告输出时自动脱敏
+  token: "${ACCEPTANCE_AUTH_TOKEN:-}"
+  header_name: "Authorization"
+  header_prefix: "Bearer "
+  test_account:
+    username: "${ACCEPTANCE_TEST_USER:-tester}"
+    password: "${ACCEPTANCE_TEST_PASS:-123456}"
+    universal_captcha: "${ACCEPTANCE_UNIVERSAL_CAPTCHA:-1234}"
+
+browser:
+  type: "${ACCEPTANCE_BROWSER:-chromium}"
+  headless: true
+  viewport: [1440, 900]
+  trace_mode: "${ACCEPTANCE_TRACE_MODE:-retain-on-failure}"
+
+databases:
+  # 动态从被测元信息接口获取库路径（亦支持环境变量直指 SQLite 文件）
+  settlement:
+    engine: "sqlite"
+    readonly: true
+    path_env: "${ACCEPTANCE_SETTLEMENT_DB:-}"
+    meta_endpoint: "/api/dbconsistency/db/meta"
+    meta_path_field: "data.dbPath"
+    reset_endpoint: "/api/dbconsistency/reset"
+    page_endpoint: "/api/dbconsistency/page"
+    tables:
+      - settle_bill
+      - settle_detail
+      - fund_account
+    amount_unit: "cents"
+    tolerance: "0.005"
+
+  crypto_vault:
+    engine: "sqlite"
+    readonly: true
+    path_env: "${ACCEPTANCE_VAULT_DB:-}"
+    meta_endpoint: "/api/crypto/vault/db/meta"
+    meta_path_field: "data.dbPath"
+    reset_endpoint: "/api/crypto/vault/reset"
+    page_endpoint: "/api/crypto/vault/page"
+    decrypt_endpoint: "/api/crypto/vault/decrypt"
+    tables:
+      - cust_profile
+    revoked_key_version: "K0"
+
+paths:
+  app_log_dir: "log/logs"
+  screenshot_dir: "logs/screenshots"
+  trace_dir: "logs/traces"
+  download_dir: "downloads"
+  report_output_dir: "report/acceptance"

@@ -1,0 +1,221 @@
+# =============================================================================
+# 验收用例与断言规则清单（可变配置层 - 迁移新项目仅需替换本文件）
+# =============================================================================
+
+profiles:
+  smoke:
+    description: "快速冒烟验收（预检 + API 契约 + UI 菜单一致性 + P0 冒烟用例 + 数据三方一致性）"
+    stages: [preflight, api_checks, ui_menu_consistency, pytest_suites, data_consistency]
+    pytest_targets:
+      - name: "smoke"
+        args: ["-m", "smoke"]
+  quick:
+    description: "核心验收（预检 + API 契约 + UI 菜单一致性 + 加密/多窗/等待用例 + 数据三方一致性）"
+    stages: [preflight, api_checks, ui_menu_consistency, pytest_suites, data_consistency]
+    pytest_targets:
+      - name: "wait_window_compat_crypt"
+        args: ["case/test_wait.py", "case/test_window.py", "case/test_compat.py", "case/test_crypt.py"]
+  full:
+    description: "全量发布验收（预检 + API 契约 + UI 菜单一致性 + 全量 37 场景 + 数据三方一致性）"
+    stages: [preflight, api_checks, ui_menu_consistency, pytest_suites, data_consistency]
+    pytest_targets:
+      - name: "all_37_cases"
+        args: ["case/"]
+  api-only:
+    description: "仅执行服务预检、API 契约校验与数据三方一致性核验（无浏览器依赖）"
+    stages: [preflight, api_checks, data_consistency]
+    pytest_targets: []
+  ui-menu:
+    description: "仅执行服务预检与 6 大分类 / 37 子界面菜单、标签、颜色一致性验收"
+    stages: [preflight, ui_menu_consistency]
+    pytest_targets: []
+  data-only:
+    description: "仅执行服务预检与数据库/API/日志三方一致性核验"
+    stages: [preflight, data_consistency]
+    pytest_targets: []
+
+# -----------------------------------------------------------------------------
+# 阶段 2：声明式 API 契约校验（正常路径 + 业务异常码 + 已知后端问题监控）
+# -----------------------------------------------------------------------------
+api_checks:
+  - id: "API-01"
+    name: "后端健康检查"
+    method: "GET"
+    path: "/api/health"
+    expect_http: 200
+    expect_json:
+      code: 0
+      data.status: "up"
+    severity: "blocker"
+
+  - id: "API-02"
+    name: "结算数据库元信息可达"
+    method: "GET"
+    path: "/api/dbconsistency/db/meta"
+    expect_http: 200
+    expect_json:
+      code: 0
+    expect_non_empty: ["data.dbPath"]
+    severity: "blocker"
+
+  - id: "API-03"
+    name: "RSA 通道公钥异步签发正常"
+    method: "GET"
+    path: "/api/crypto/pubkey"
+    expect_http: 200
+    expect_json:
+      code: 0
+    expect_non_empty: ["data.fingerprint", "data.publicKeyPem"]
+    severity: "blocker"
+
+  - id: "API-04"
+    name: "明文登录通道被服务端拒绝（异常码 1001，HTTP 仍 200）"
+    method: "POST"
+    path: "/api/crypto/login/plain"
+    payload:
+      account: "fund001"
+      password: "AcceptanceCheckPassword"
+    expect_http: 200
+    expect_json:
+      code: 1001
+    severity: "blocker"
+
+  - id: "API-05"
+    name: "脱敏客户档案列表与原文数据源条数一致"
+    method: "GET"
+    path: "/api/crypto/masked/customers"
+    expect_http: 200
+    expect_json:
+      code: 0
+    expect_non_empty: ["data.rows"]
+    severity: "major"
+
+  - id: "API-06"
+    name: "密文存储库元信息与密钥版本可读"
+    method: "GET"
+    path: "/api/crypto/vault/db/meta"
+    expect_http: 200
+    expect_json:
+      code: 0
+    expect_non_empty: ["data.dbPath", "data.currentKeyVersion"]
+    severity: "blocker"
+
+  - id: "API-07"
+    name: "加密报文会话密钥与正常报文下发"
+    method: "GET"
+    path: "/api/crypto/envelope"
+    params:
+      mode: "normal"
+    expect_http: 200
+    expect_json:
+      code: 0
+    expect_non_empty: ["data.ts", "data.sign", "data.encB64", "data.ivB64"]
+    severity: "blocker"
+
+  - id: "API-08"
+    name: "服务端造数接口可用性探针（X-04 监控）"
+    method: "POST"
+    path: "/api/seed/new"
+    payload:
+      bizName: "acceptance-probe"
+    expect_http: 200
+    expect_json:
+      code: 0
+    severity: "major"
+    known_backend_issue: "被测后端旧进程未重启时 POST /api/seed/new 返回 HTTP 500（属被测系统后端缺陷，须如实告警，不可绕过）"
+
+# -----------------------------------------------------------------------------
+# 阶段 3：UI 菜单加载与标签/颜色一致性检查配置
+# -----------------------------------------------------------------------------
+ui_menu_consistency:
+  pytest_target: "demo/test_menu_tag_consistency.py"
+  expected_groups: 6
+  expected_pages: 37
+
+# -----------------------------------------------------------------------------
+# 阶段 5：数据库与三方一致性核验配置
+# -----------------------------------------------------------------------------
+data_consistency_checks:
+  settlement_three_way:
+    enabled: true
+    reset_before: true
+    reset_after: true
+    check_pagination: true
+    check_null_unsettled: true
+    check_negative_amount: true
+    check_summary_drift: true
+    check_fund_accounts: true
+  crypto_vault_three_way:
+    enabled: true
+    reset_before: true
+    check_cipher_not_plaintext: true
+    min_cipher_length: 24
+    check_revoked_key_version: true
+    check_null_field_code: 2003
+  crypto_envelope_verify:
+    enabled: true
+    modes:
+      - mode: "normal"
+        expect_verify_code: 0
+      - mode: "expired"
+        expect_verify_code: 2001
+      - mode: "tampered"
+        expect_verify_code: 2002
+  log_anomaly_scan:
+    enabled: true
+    max_lines: 300
+    alert_levels: ["CRITICAL"]
+
+# -----------------------------------------------------------------------------
+# 准出红线门禁规则
+# -----------------------------------------------------------------------------
+blocking_rules:
+  preflight_must_pass: true
+  blocker_api_must_pass: true
+  data_consistency_must_pass: true
+  ui_menu_must_pass: true
+  min_pytest_pass_rate_excluding_known_backend: 1.0
+  # 若仅已知后端缺陷（如 X-04 HTTP 500）失败，结论降级为「有条件通过 / 待后端修复」，绝不伪造「全部通过」
+  downgrade_on_known_backend_issue: true
+
+# -----------------------------------------------------------------------------
+# 37 个场景验收资产目录（从 case/test_*.py 与 config/*Element.ini 提取）
+# -----------------------------------------------------------------------------
+scenario_catalog:
+  - {id: "I-01", group: "页面交互类", route: "/i/01", priority: "P0", node: "case/test_interact.py::test_i01_not_interactable", keywords: ["交接记录已保存", "高级配置已应用"]}
+  - {id: "I-02", group: "页面交互类", route: "/i/02", priority: "P0", node: "case/test_interact.py::test_i02_click_intercepted", keywords: ["对账计算完成", "已开始下载对账结果文件"]}
+  - {id: "I-03", group: "页面交互类", route: "/i/03", priority: "P1", node: "case/test_interact.py::test_i03_stale_element", keywords: ["已查看任务"]}
+  - {id: "I-04", group: "页面交互类", route: "/i/04", priority: "P1", node: "case/test_interact.py::test_i04_iframe_nested", keywords: ["主页面已同步到内层提交", "主文档记录"]}
+  - {id: "I-05", group: "页面交互类", route: "/i/05", priority: "P1", node: "case/test_interact.py::test_i05_shadow_dom", keywords: ["影子外层已保存", "影子内层子任务已执行完成", "穿透读取内层"]}
+  - {id: "I-06", group: "页面交互类", route: "/i/06", priority: "P1", node: "case/test_interact.py::test_i06_dynamic_attributes", keywords: ["资产信息已提交"]}
+  - {id: "I-07", group: "页面交互类", route: "/i/07", priority: "P1", node: "case/test_interact.py::test_i07_dropdowns", keywords: ["原生条件查询", "组件条件查询"]}
+  - {id: "I-08", group: "页面交互类", route: "/i/08", priority: "P1", node: "case/test_interact.py::test_i08_hover_menu", keywords: ["批量标签", "编辑资料"]}
+  - {id: "I-09", group: "页面交互类", route: "/i/09", priority: "P1", node: "case/test_interact.py::test_i09_drag_drop", keywords: ["分配确认"]}
+  - {id: "I-10", group: "页面交互类", route: "/i/10", priority: "P1", node: "case/test_interact.py::test_i10_file_upload", keywords: ["已选择本地文件", "登记号"]}
+  - {id: "I-11", group: "页面交互类", route: "/i/11", priority: "P1", node: "case/test_interact.py::test_i11_native_dialogs", keywords: ["已查看告警", "补货确认弹窗", "已登记备注"]}
+  - {id: "I-12", group: "页面交互类", route: "/i/12", priority: "P1", node: "case/test_interact.py::test_i12_rich_text", keywords: ["公告已发布"]}
+  - {id: "I-13", group: "页面交互类", route: "/i/13", priority: "P1", node: "case/test_interact.py::test_i13_animation", keywords: ["已确认阅读系统升级公告"]}
+  - {id: "I-14", group: "页面交互类", route: "/i/14", priority: "P1", node: "case/test_interact.py::test_i14_lazy_load", keywords: ["已加载全部任务"]}
+  - {id: "I-15", group: "页面交互类", route: "/i/15", priority: "P2", node: "case/test_interact.py::test_i15_coordinate_offset", keywords: ["目标货架已标记", "目标点位 rect"]}
+  - {id: "I-16", group: "页面交互类", route: "/i/16", priority: "P1", node: "case/test_interact.py::test_i16_controlled_input", keywords: ["工单已提交", "发票冲红", "备注已清空"]}
+  - {id: "I-17", group: "页面交互类", route: "/i/17", priority: "P0", node: "case/test_interact.py::test_i17_parent_child_amount", keywords: ["重算完成", "金额一致"]}
+  - {id: "I-18", group: "页面交互类", route: "/i/18", priority: "P0", node: "case/test_interact.py::test_i18_page_db_consistency", keywords: ["数据库已重建", "页面数据未自动刷新", "已刷新数据快照"]}
+  - {id: "W-01", group: "等待与响应类", route: "/w/01", priority: "P0", node: "case/test_wait.py::test_w01_slow_loading", keywords: ["查询完成"]}
+  - {id: "W-02", group: "等待与响应类", route: "/w/02", priority: "P1", node: "case/test_wait.py::test_w02_spa_route_switch", keywords: ["当前子视图：flow"]}
+  - {id: "W-03", group: "等待与响应类", route: "/w/03", priority: "P1", node: "case/test_wait.py::test_w03_export_task", keywords: ["导出完成", "已触发下载导出文件"]}
+  - {id: "W-04", group: "等待与响应类", route: "/w/04", priority: "P1", node: "case/test_wait.py::test_w04_race_assert", keywords: ["保存请求完成"]}
+  - {id: "W-05", group: "等待与响应类", route: "/w/05", priority: "P1", node: "case/test_wait.py::test_w05_unstable_api", keywords: ["同步成功"]}
+  - {id: "M-01", group: "多窗口与多标签", route: "/m/01", priority: "P1", node: "case/test_window.py::test_m01_new_tab", keywords: ["已通过脚本触发打开新标签（成功）"]}
+  - {id: "M-02", group: "多窗口与多标签", route: "/m/02", priority: "P1", node: "case/test_window.py::test_m02_oauth_popup", keywords: ["授权成功并自动关闭", "已使用授权票据拉取渠道数据"]}
+  - {id: "M-03", group: "多窗口与多标签", route: "/m/03", priority: "P1", node: "case/test_window.py::test_m03_window_iframe", keywords: ["主档登记完成：第 1 次"]}
+  - {id: "M-04", group: "多窗口与多标签", route: "/m/04", priority: "P2", node: "case/test_window.py::test_m04_popup_blocked", keywords: ["立即预览：预览窗口已打开"]}
+  - {id: "C-01", group: "浏览器兼容类", route: "/c/01", priority: "P1", node: "case/test_compat.py::test_c01_date_input", keywords: ["排期已提交"]}
+  - {id: "C-02", group: "浏览器兼容类", route: "/c/02", priority: "P2", node: "case/test_compat.py::test_c02_env_info", keywords: ["已采集当前浏览器环境信息"]}
+  - {id: "X-01", group: "其他疑难类", route: "/x/01", priority: "P1", node: "case/test_misc.py::test_x01_captcha", keywords: ["验证码校验通过", "登录成功"], red_line: "仅用万能码 1234，禁止接 OCR"}
+  - {id: "X-02", group: "其他疑难类", route: "/x/02", priority: "P1", node: "case/test_misc.py::test_x02_bot_detection", keywords: ["环境校验完成"], red_line: "禁止注入反自动化参数，按实际检测分支断言"}
+  - {id: "X-03", group: "其他疑难类", route: "/x/03", priority: "P1", node: "case/test_misc.py::test_x03_cookie_session", keywords: ["登录成功", "已退出登录", "登录态检测：未登录"]}
+  - {id: "X-04", group: "其他疑难类", route: "/x/04", priority: "P1", node: "case/test_misc.py::test_x04_seed_data", keywords: ["服务端已生成工单", "工单已归档"], known_backend_issue: "POST /api/seed/new HTTP 500"}
+  - {id: "E-01", group: "数据加密类", route: "/e/01", priority: "P0", node: "case/test_crypt.py::TestCryptScenario::test_e01_transport_encryption", keywords: ["服务端解密成功", "明文提交失败", "加密提交失败"]}
+  - {id: "E-02", group: "数据加密类", route: "/e/02", priority: "P0", node: "case/test_crypt.py::TestCryptScenario::test_e02_masked_display", keywords: ["档案列表已刷新", "已自动收起", "已取服务端原始数据"]}
+  - {id: "E-03", group: "数据加密类", route: "/e/03", priority: "P0", node: "case/test_crypt.py::TestCryptScenario::test_e03_cipher_storage", keywords: ["密文库已重置", "同明文密文共 2 份", "解密成功"]}
+  - {id: "E-04", group: "数据加密类", route: "/e/04", priority: "P0", node: "case/test_crypt.py::TestCryptScenario::test_e04_response_encryption", keywords: ["本地解密成功", "签名校验通过", "时间戳已过期", "内容已被篡改"]}
