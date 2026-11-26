@@ -1,0 +1,37 @@
+env:
+  active: dev
+  dev:
+    base_url: "http://localhost:5173"
+    api_base_url: "http://127.0.0.1:5050"
+    timeout: 15
+  prod:
+    base_url: "http://localhost:5173"
+    api_base_url: "http://127.0.0.1:5050"
+    timeout: 15
+
+browser:
+  # 浏览器类型：chromium / chrome / edge / firefox / webkit
+  #   - chromium：Playwright 内置 Chromium（默认；配合 executable_path 可驱动 360/QQ 等国产 Chromium 浏览器）
+  #   - chrome：本机 Chrome（channel="chrome"）
+  #   - edge：本机 Edge（channel="msedge"）
+  #   - firefox：Playwright 内置 Firefox
+  #   - webkit：Playwright 内置 WebKit（别名 safari 自动归一为 webkit，Windows/Linux/macOS 全平台可跑）
+  #   - pytest 命令行 --browser 可覆盖本配置；360/qq 等别名会自动归一为 chromium
+  type: chromium
+  executable_path: ""       # [chromium 系] 可选：国产浏览器或自定义内核绝对路径（兼容旧字段 binary_path）
+  headless: false
+  slow_mo: 0                # 调试用动作延迟（毫秒），0 表示不延迟
+  action_timeout: 15        # 元素操作默认超时（秒）
+  navigation_timeout: 30    # 页面导航默认超时（秒）
+  viewport: [1920, 1080]    # 视口宽高
+  maximize_window: false    # 有头 Chromium 模式下为 true 时以最大化窗口启动（no_viewport）
+  download_dir: "downloads"
+
+screenshot:
+  on_failure: true
+  path: "logs/screenshots"
+
+trace:
+  # Trace 录制策略：retain-on-failure（推荐，仅失败落盘）/ on / off
+  mode: "retain-on-failure"
+  path: "logs/traces"
