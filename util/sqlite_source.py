@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from pathlib import Path
 from typing import Any
 
 # 允许直查的表及其主键列（避免拼接 SQL 的注入面）
@@ -31,14 +32,28 @@ _TABLES: dict[str, str] = {
 }
 
 
+def resolve_sqlite_path(db_path: str) -> str:
+    """解析 SQLite 路径：本地存在直接返回；跨容器时按 SUT_DB_DIR_OVERRIDE 映射同名库文件。"""
+    if os.path.exists(db_path):
+        return db_path
+    override_dir = os.environ.get("SUT_DB_DIR_OVERRIDE", "").strip()
+    if override_dir:
+        filename = db_path.replace("\\", "/").rsplit("/", 1)[-1]
+        mapped = os.path.join(override_dir, filename)
+        if os.path.exists(mapped):
+            return mapped
+    return db_path
+
+
 class SqliteSource:
     """SQLite 只读数据源：按表返回原始行，金额单位为「分」。"""
 
     def __init__(self, db_path: str, timeout: int = 10):
-        self.db_path = db_path
+        resolved_path = resolve_sqlite_path(db_path)
+        self.db_path = resolved_path
         self.timeout = timeout
-        if not os.path.exists(db_path):
-            raise FileNotFoundError(f"❌ 被测 SQLite 库文件不存在: {db_path}")
+        if not os.path.exists(resolved_path):
+            raise FileNotFoundError(f"❌ 被测 SQLite 库文件不存在: {resolved_path}")
 
     def __repr__(self) -> str:  # pragma: no cover - 调试辅助
         return f"SqliteSource({self.db_path})"
@@ -67,7 +82,8 @@ class SqliteSource:
         return self._query(sql, params)
 
     def _query(self, sql: str, params: tuple) -> list[dict[str, Any]]:
-        conn = sqlite3.connect(self.db_path, timeout=self.timeout)
+        uri = f"file:{Path(self.db_path).resolve().as_posix()}?mode=ro"
+        conn = sqlite3.connect(uri, uri=True, timeout=self.timeout)
         conn.row_factory = sqlite3.Row
         try:
             return [dict(row) for row in conn.execute(sql, params).fetchall()]

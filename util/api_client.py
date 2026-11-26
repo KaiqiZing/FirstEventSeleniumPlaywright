@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import os
 from typing import Any
 
 import requests
@@ -16,7 +17,12 @@ from log.user_log import get_logger
 class ApiClient:
     def __init__(self, base_url: str | None = None, timeout: int = 10):
         env_config = Config().get_env_config()
-        self.base_url = (base_url or str(env_config.get("api_base_url", "http://127.0.0.1:5000"))).rstrip("/")
+        env_override = os.environ.get("ACCEPTANCE_API_URL", "").strip()
+        self.base_url = (
+            base_url
+            or env_override
+            or str(env_config.get("api_base_url", "http://127.0.0.1:5050"))
+        ).rstrip("/")
         self.timeout = timeout
         self.session = requests.Session()
         self.logger = get_logger()

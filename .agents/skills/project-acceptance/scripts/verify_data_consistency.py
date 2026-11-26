@@ -94,15 +94,26 @@ def _query_table(db_path: str, table: str, allowed_tables: list[str]) -> list[di
 def _resolve_db_path(session: requests.Session, api_base: str, db_cfg: dict[str, Any]) -> str:
     env_path = str(db_cfg.get("path_env") or "").strip()
     if env_path:
-        return env_path
-    meta_endpoint = db_cfg["meta_endpoint"]
-    resp = session.get(f"{api_base}{meta_endpoint}", timeout=10)
-    resp.raise_for_status()
-    body = resp.json()
-    db_path = get_by_dotted_path(body, db_cfg.get("meta_path_field", "data.dbPath"))
-    if not db_path:
-        raise RuntimeError(f"元信息接口 {meta_endpoint} 未返回有效库路径: {body}")
-    return str(db_path)
+        raw_path = env_path
+    else:
+        meta_endpoint = db_cfg["meta_endpoint"]
+        resp = session.get(f"{api_base}{meta_endpoint}", timeout=10)
+        resp.raise_for_status()
+        body = resp.json()
+        db_path = get_by_dotted_path(body, db_cfg.get("meta_path_field", "data.dbPath"))
+        if not db_path:
+            raise RuntimeError(f"元信息接口 {meta_endpoint} 未返回有效库路径: {body}")
+        raw_path = str(db_path)
+
+    if Path(raw_path).exists():
+        return raw_path
+    override_dir = os.environ.get("SUT_DB_DIR_OVERRIDE", "").strip()
+    if override_dir:
+        filename = raw_path.replace("\\", "/").rsplit("/", 1)[-1]
+        mapped = Path(override_dir) / filename
+        if mapped.exists():
+            return str(mapped)
+    return raw_path
 
 
 def _check_settlement_three_way(
