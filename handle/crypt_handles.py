@@ -81,14 +81,24 @@ class E01Handle(BaseScenarioHandle):
         """等待状态标签过渡动画收敛并变为期望值后再取文本。"""
         deadline = time.time() + (timeout or self.wait.timeout)
         texts: list[str] = []
+        locator = self.page.locator(self.loc("state_tag"))
         while time.time() < deadline:
-            visible_tags = self.page.locator(self.loc("state_tag")).locator("visible=true").all()
-            texts = []
-            for el in visible_tags:
-                try:
-                    texts.append(el.inner_text().strip())
-                except Exception:
-                    continue
+            try:
+                texts = locator.evaluate_all(
+                    """els => els
+                        .filter(el => {
+                            const style = window.getComputedStyle(el);
+                            const rect = el.getBoundingClientRect();
+                            return style.display !== 'none'
+                                && style.visibility !== 'hidden'
+                                && parseFloat(style.opacity || '1') > 0
+                                && rect.width > 0 && rect.height > 0;
+                        })
+                        .map(el => (el.innerText || '').trim())
+                        .filter(Boolean)"""
+                )
+            except Exception:
+                texts = []
             if len(texts) == 1 and (expected is None or texts[0] == expected):
                 return texts[0]
             self.page.wait_for_timeout(200)
