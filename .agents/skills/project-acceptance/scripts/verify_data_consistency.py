@@ -71,24 +71,52 @@ def _amount_equal(actual: Any, expected: Any, tolerance: Decimal) -> bool:
     return abs(Decimal(str(actual)) - Decimal(str(expected))) <= tolerance
 
 
-def _connect_readonly(db_path: str) -> sqlite3.Connection:
+_TRANSIENT_SQLITE_ERRORS = (
+    "attempt to write a readonly database",
+    "database is locked",
+    "database table is locked",
+    "database schema is locked",
+    "disk i/o error",
+    "unable to open database file",
+)
+
+
+def _connect_readonly(db_path: str, timeout: float = 10.0) -> sqlite3.Connection:
     resolved = Path(db_path).resolve()
     if not resolved.exists():
         raise FileNotFoundError(f"SQLite 库文件不存在: {resolved}")
     uri = f"file:{resolved.as_posix()}?mode=ro"
-    conn = sqlite3.connect(uri, uri=True, timeout=10)
+    conn = sqlite3.connect(uri, uri=True, timeout=timeout)
     conn.row_factory = sqlite3.Row
     return conn
 
 
-def _query_table(db_path: str, table: str, allowed_tables: list[str]) -> list[dict[str, Any]]:
+def _query_table(
+    db_path: str,
+    table: str,
+    allowed_tables: list[str],
+    timeout: float = 10.0,
+) -> list[dict[str, Any]]:
     if table not in allowed_tables:
         raise ValueError(f"表 {table} 不在配置白名单内: {allowed_tables}")
-    conn = _connect_readonly(db_path)
-    try:
-        return [dict(row) for row in conn.execute(f"SELECT * FROM {table}").fetchall()]
-    finally:
-        conn.close()
+    deadline = time.monotonic() + max(float(timeout), 1.0)
+    delay = 0.05
+    while True:
+        conn: sqlite3.Connection | None = None
+        try:
+            conn = _connect_readonly(db_path, timeout=timeout)
+            return [dict(row) for row in conn.execute(f"SELECT * FROM {table}").fetchall()]
+        except sqlite3.OperationalError as exc:
+            msg = str(exc).lower()
+            is_transient = any(token in msg for token in _TRANSIENT_SQLITE_ERRORS)
+            remaining = deadline - time.monotonic()
+            if not is_transient or remaining <= 0:
+                raise
+            time.sleep(min(delay, remaining))
+            delay = min(delay * 1.5, 0.3)
+        finally:
+            if conn is not None:
+                conn.close()
 
 
 def _resolve_db_path(session: requests.Session, api_base: str, db_cfg: dict[str, Any]) -> str:

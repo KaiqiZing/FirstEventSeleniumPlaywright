@@ -19,8 +19,21 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import time
 from pathlib import Path
 from typing import Any
+
+# 跨 WSL2 / Docker 9p 挂载只读直连 Windows 宿主 SQLite 时的瞬态可恢复错误：
+# 宿主写入期间存在临时 -journal 文件，Linux 侧 mode=ro 打开会触发热日志恢复尝试，
+# 抛出 "attempt to write a readonly database"（sqlite3 busy_timeout 不会重试该错误码）。
+_TRANSIENT_SQLITE_ERRORS = (
+    "attempt to write a readonly database",
+    "database is locked",
+    "database table is locked",
+    "database schema is locked",
+    "disk i/o error",
+    "unable to open database file",
+)
 
 # 允许直查的表及其主键列（避免拼接 SQL 的注入面）
 _TABLES: dict[str, str] = {
@@ -83,9 +96,22 @@ class SqliteSource:
 
     def _query(self, sql: str, params: tuple) -> list[dict[str, Any]]:
         uri = f"file:{Path(self.db_path).resolve().as_posix()}?mode=ro"
-        conn = sqlite3.connect(uri, uri=True, timeout=self.timeout)
-        conn.row_factory = sqlite3.Row
-        try:
-            return [dict(row) for row in conn.execute(sql, params).fetchall()]
-        finally:
-            conn.close()
+        deadline = time.monotonic() + max(float(self.timeout), 1.0)
+        delay = 0.05
+        while True:
+            conn: sqlite3.Connection | None = None
+            try:
+                conn = sqlite3.connect(uri, uri=True, timeout=self.timeout)
+                conn.row_factory = sqlite3.Row
+                return [dict(row) for row in conn.execute(sql, params).fetchall()]
+            except sqlite3.OperationalError as exc:
+                msg = str(exc).lower()
+                is_transient = any(token in msg for token in _TRANSIENT_SQLITE_ERRORS)
+                remaining = deadline - time.monotonic()
+                if not is_transient or remaining <= 0:
+                    raise
+                time.sleep(min(delay, remaining))
+                delay = min(delay * 1.5, 0.3)
+            finally:
+                if conn is not None:
+                    conn.close()
