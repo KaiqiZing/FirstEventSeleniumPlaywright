@@ -1,9 +1,11 @@
 """统一 Playwright Browser / BrowserContext / Page 创建工厂。"""
 from __future__ import annotations
 
+import os
 import platform
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from playwright.sync_api import Browser, BrowserContext, Page, Playwright
 
@@ -27,6 +29,29 @@ class BrowserFactory:
     }
 
     SUPPORTED_BROWSERS = ("chromium", "chrome", "edge", "firefox", "webkit")
+    _LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+    @staticmethod
+    def _resolve_insecure_http_origin() -> tuple[str, str] | None:
+        """若目标前端地址为非回环 HTTP（如 Docker 内的 http://host.docker.internal:5173），
+        返回 (origin, hostname) 供浏览器安全上下文白名单注入，以启用 Web Crypto。
+        回环地址（localhost / 127.0.0.1）与 HTTPS 本身即安全上下文，返回 None。
+        """
+        raw = os.environ.get("ACCEPTANCE_FRONTEND_URL", "").strip()
+        if not raw:
+            env_cfg = Config().get_env_config()
+            raw = str(env_cfg.get("base_url", "")).strip()
+        if not raw:
+            return None
+        parsed = urlsplit(raw)
+        hostname = (parsed.hostname or "").strip().lower()
+        if (
+            parsed.scheme.lower() != "http"
+            or not hostname
+            or hostname in BrowserFactory._LOOPBACK_HOSTS
+        ):
+            return None
+        return f"{parsed.scheme}://{parsed.netloc}", hostname
 
     @staticmethod
     def _project_dir() -> Path:
@@ -108,6 +133,8 @@ class BrowserFactory:
         if download_dir:
             launch_kwargs["downloads_path"] = str(download_dir)
 
+        insecure_target = BrowserFactory._resolve_insecure_http_origin()
+
         if browser_name in ("chromium", "chrome", "edge"):
             args: list[str] = []
             if platform.system() == "Linux":
@@ -116,6 +143,8 @@ class BrowserFactory:
                 args.append("--disable-gpu")
             if maximize and not use_headless:
                 args.append("--start-maximized")
+            if insecure_target:
+                args.append(f"--unsafely-treat-insecure-origin-as-secure={insecure_target[0]}")
             if args:
                 launch_kwargs["args"] = args
 
@@ -126,28 +155,44 @@ class BrowserFactory:
                     BrowserFactory.logger.info("Chromium executable_path: %s", exec_path)
                     browser = playwright.chromium.launch(**launch_kwargs)
                 else:
-                    try:
-                        browser = playwright.chromium.launch(**launch_kwargs)
-                    except Exception as exc:
-                        if "Executable doesn't exist" not in str(exc):
-                            raise
-                        BrowserFactory.logger.warning(
-                            "未检测到匹配版本的 Playwright 内置 Chromium，尝试回退使用本机 Chrome/Edge 通道"
-                        )
-                        browser = None
-                        for fallback_channel in ("chrome", "msedge"):
-                            try:
-                                browser = playwright.chromium.launch(
-                                    channel=fallback_channel, **launch_kwargs
-                                )
-                                BrowserFactory.logger.info(
-                                    "已回退至本机浏览器通道: channel=%s", fallback_channel
-                                )
-                                break
-                            except Exception:
-                                continue
-                        if browser is None:
-                            raise
+                    browser = None
+                    if use_headless and insecure_target:
+                        try:
+                            browser = playwright.chromium.launch(
+                                channel="chromium", **launch_kwargs
+                            )
+                            BrowserFactory.logger.info(
+                                "非回环 HTTP 站点 %s 已启用完整 Chromium 通道以支持安全上下文（Web Crypto）",
+                                insecure_target[0],
+                            )
+                        except Exception as exc:
+                            if "Executable doesn't exist" not in str(exc):
+                                raise
+                            BrowserFactory.logger.warning(
+                                "完整 Chromium 通道不可用，回退默认 headless 通道: %s", exc
+                            )
+                    if browser is None:
+                        try:
+                            browser = playwright.chromium.launch(**launch_kwargs)
+                        except Exception as exc:
+                            if "Executable doesn't exist" not in str(exc):
+                                raise
+                            BrowserFactory.logger.warning(
+                                "未检测到匹配版本的 Playwright 内置 Chromium，尝试回退使用本机 Chrome/Edge 通道"
+                            )
+                            for fallback_channel in ("chrome", "msedge"):
+                                try:
+                                    browser = playwright.chromium.launch(
+                                        channel=fallback_channel, **launch_kwargs
+                                    )
+                                    BrowserFactory.logger.info(
+                                        "已回退至本机浏览器通道: channel=%s", fallback_channel
+                                    )
+                                    break
+                                except Exception:
+                                    continue
+                            if browser is None:
+                                raise
             elif browser_name == "chrome":
                 launch_kwargs["channel"] = "chrome"
                 browser = playwright.chromium.launch(**launch_kwargs)
@@ -155,6 +200,15 @@ class BrowserFactory:
                 launch_kwargs["channel"] = "msedge"
                 browser = playwright.chromium.launch(**launch_kwargs)
         elif browser_name == "firefox":
+            if insecure_target:
+                launch_kwargs["firefox_user_prefs"] = {
+                    "dom.securecontext.allowlist": insecure_target[1],
+                }
+                BrowserFactory.logger.info(
+                    "非回环 HTTP 站点 %s 已为 Firefox 注入安全上下文白名单: %s",
+                    insecure_target[0],
+                    insecure_target[1],
+                )
             browser = playwright.firefox.launch(**launch_kwargs)
         else:
             browser = playwright.webkit.launch(**launch_kwargs)

@@ -79,16 +79,28 @@ class CryptBusiness:
             h.wait_pubkey_ready()
             before = h.fingerprint()
             h.fill_credentials(account, password)
-        with biz_step("服务端轮换密钥对，页面仍用旧公钥提交（应失败）"):
-            h.rotate_pubkey_by_api()
-            h.submit_encrypted()
-            assert h.wait_log(E01Handle.ENCRYPT_FAILED), "轮换后旧密文应解密失败（1003）"
-            assert h.digest_match() != E01Handle.DIGEST_MATCHED, (
-                f"轮换后不应再出现「{E01Handle.DIGEST_MATCHED}」的摘要比对结果"
-            )
-            assert h.server_digest().upper() != password_digest(password), (
-                "轮换后旧密文不应解密成功，摘要区不得出现本次口令的摘要"
-            )
+        if h.web_crypto_available():
+            with biz_step("服务端轮换密钥对，页面仍用旧公钥提交（应失败）"):
+                h.rotate_pubkey_by_api()
+                h.submit_encrypted()
+                assert h.wait_log(E01Handle.ENCRYPT_FAILED), "轮换后旧密文应解密失败（1003）"
+                assert h.digest_match() != E01Handle.DIGEST_MATCHED, (
+                    f"轮换后不应再出现「{E01Handle.DIGEST_MATCHED}」的摘要比对结果"
+                )
+                assert h.server_digest().upper() != password_digest(password), (
+                    "轮换后旧密文不应解密成功，摘要区不得出现本次口令的摘要"
+                )
+        else:
+            with biz_step("非安全上下文降级：轮换前获取旧密文，轮换后校验后端拒绝旧密文（1003）"):
+                enc_box = h.api.crypto_encrypt(password, alg="RSA-OAEP").get("data") or {}
+                old_cipher = str(enc_box.get("cipherB64") or "")
+                old_version = enc_box.get("keyVersion")
+                assert old_cipher, f"轮换前生成旧公钥密文失败: {enc_box}"
+                h.rotate_pubkey_by_api()
+                rejected = h.api.crypto_login_encrypted(account, old_cipher, old_version)
+                assert rejected.get("code") == 1003, (
+                    f"轮换后提交旧公钥密文应返回 1003，实际: {rejected}"
+                )
         with biz_step("页面重新签发公钥后再次提交（应成功）"):
             after = h.reload_pubkey()
             h.submit_encrypted()

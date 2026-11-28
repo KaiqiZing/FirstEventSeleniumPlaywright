@@ -154,7 +154,7 @@ class TestCryptScenario:
             # 10. 密钥轮换
             before, after = biz.run_e01_rotate_then_resubmit(account, f"{password}C")
             assert before != after, f"轮换并重新签发后公钥指纹应变化: {before} -> {after}"
-            if net.enabled:
+            if net.enabled and h.web_crypto_available():
                 codes = [
                     (w.get("resp_json") or {}).get("code")
                     for w in net.records(E01Handle.ENC_URL)

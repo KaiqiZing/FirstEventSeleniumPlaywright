@@ -44,6 +44,17 @@ class E01Handle(BaseScenarioHandle):
         self.net = get_network_recorder(page)
 
     # ---------------- 公钥（异步资源） ---------------- #
+    def web_crypto_available(self) -> bool:
+        """当前页面是否处于安全上下文并具备 Web Crypto（RSA-OAEP / SHA-256）。"""
+        try:
+            return bool(
+                self.page.evaluate(
+                    "() => !!(window.crypto && window.crypto.subtle && window.isSecureContext)"
+                )
+            )
+        except Exception:
+            return False
+
     def wait_pubkey_ready(self, timeout: int | None = None) -> str:
         deadline = time.time() + (timeout or self.wait.timeout)
         fingerprint = ""
